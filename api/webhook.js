@@ -24,7 +24,6 @@ const MODES = {
     emoji: '🔬',
     label: 'research',
     ackVerb: 'Kicking off a research agent',
-    autoCreatePR: false,
     buildPrompt: ({ itemName, repo, contextBlock }) => `You are researching a ticket from monday.com.
 
 Ticket title: ${itemName}
@@ -52,7 +51,6 @@ Do not modify code. Keep the brief tight (under ~400 words).`,
     emoji: '🔧',
     label: 'implement',
     ackVerb: 'Kicking off an implementation agent',
-    autoCreatePR: true,
     buildPrompt: ({ itemName, repo, contextBlock }) => `You are implementing a ticket from monday.com.
 
 Ticket title: ${itemName}
@@ -184,7 +182,6 @@ async function handleReply(event, host) {
       repository: repo,
       webhookUrl: callbackUrl,
       model: process.env.CURSOR_MODEL || 'gpt-5.5-high',
-      autoCreatePR: mode.autoCreatePR,
     });
     const agentUrl = agent?.target?.url ?? agent?.url ?? `https://cursor.com/agents/${agent?.id ?? ''}`;
     await postUpdate(
