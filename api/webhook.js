@@ -3,7 +3,6 @@ import {
   escapeHtml,
   stripHtml,
   getRepoUrl,
-  getBotUserId,
 } from '../lib/monday.js';
 import { launchAgent } from '../lib/cursor.js';
 
@@ -11,7 +10,7 @@ const INITIAL_COMMENT = (itemName) => `
 👋 Hey team — I'm here to triage <b>${escapeHtml(itemName)}</b>.<br><br>
 Before I can act, please:<br>
 1. Fill in the <b>Repositories</b> column with the GitHub repo URL.<br>
-2. Reply to this update with <b>research</b> or <b>implement</b>.
+2. Reply with <code>SYSTEM OVERRIDE research</code> or <code>SYSTEM OVERRIDE implement</code>.
 `.trim();
 
 const IMPLEMENT_STUB = `🔧 <b>Implement</b> mode isn't wired up yet — coming in step 3. For now, try <b>research</b>.`;
@@ -41,21 +40,6 @@ export default async function handler(req, res) {
     const event = body?.event;
     const type = event?.type;
 
-    // Loop prevention: ignore anything authored by the bot itself.
-    // Disable by setting DISABLE_SELF_CHECK=true (useful when the bot's token
-    // belongs to a real human who also posts replies for testing).
-    if (event?.userId && process.env.DISABLE_SELF_CHECK !== 'true') {
-      const botId = await getBotUserId();
-      if (botId && String(event.userId) === botId) {
-        // Don't loop on the bot's *own* updates — recognize them by body prefix
-        const text = stripHtml(event.body ?? event.textBody ?? '');
-        const isBotComment = /^(👋 Hey team|🔬 Spinning up|✅ Research complete|❌ Research agent|🔧|⚠️)/.test(text);
-        if (isBotComment) {
-          console.log('[monday-bot] Skipping self-authored bot comment');
-          return res.status(200).json({ ok: true });
-        }
-      }
-    }
 
     if (type === 'create_pulse') {
       await postUpdate(event.pulseId, INITIAL_COMMENT(event.pulseName ?? 'this item'));
@@ -75,13 +59,22 @@ export default async function handler(req, res) {
 
 async function handleReply(event, req) {
   const itemId = event.pulseId;
-  const text = stripHtml(event.body ?? event.textBody ?? '').toLowerCase();
+  const text = stripHtml(event.body ?? event.textBody ?? '');
 
-  const wantsResearch = /\bresearch\b/.test(text);
-  const wantsImplement = /\bimplement\b/.test(text);
+  // Strict trigger: only act when the user explicitly opts in.
+  // This also kills the bot-replying-to-itself loop, since the bot never
+  // starts its own comments with this phrase.
+  const match = text.match(/^\s*SYSTEM\s+OVERRIDE\s+(\w+)/i);
+  if (!match) {
+    console.log(`[monday-bot] No SYSTEM OVERRIDE in reply on item ${itemId}`);
+    return;
+  }
+  const command = match[1].toLowerCase();
+  const wantsResearch = command === 'research';
+  const wantsImplement = command === 'implement';
 
   if (!wantsResearch && !wantsImplement) {
-    console.log(`[monday-bot] No keyword match in reply on item ${itemId}`);
+    console.log(`[monday-bot] Unknown command "${command}" on item ${itemId}`);
     return;
   }
 
