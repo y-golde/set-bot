@@ -3,7 +3,8 @@ import {
   postUpdate,
   escapeHtml,
   stripHtml,
-  getRepoUrl,
+  getItemWithColumns,
+  extractRepoUrl,
 } from '../lib/monday.js';
 import { launchAgent } from '../lib/cursor.js';
 
@@ -94,11 +95,14 @@ async function handleReply(event, host) {
     return;
   }
 
-  const repo = await getRepoUrl(itemId);
+  // Fetch the full item — replies don't include the item name in the payload.
+  const item = await getItemWithColumns(itemId);
+  const repo = extractRepoUrl(item);
   if (!repo) {
     await postUpdate(itemId, MISSING_REPO);
     return;
   }
+  const itemName = item?.name ?? event.pulseName ?? '(unknown)';
 
   // Acknowledge first so the user sees activity even if Cursor is slow.
   await postUpdate(
@@ -107,18 +111,19 @@ async function handleReply(event, host) {
   );
 
   const callbackUrl = `https://${host}/api/cursor-webhook?itemId=${encodeURIComponent(itemId)}`;
-  const itemLabel = event.pulseName ? `"${event.pulseName}"` : `monday item ${itemId}`;
-  const prompt = `You are researching a ticket from monday.com (${itemLabel}).
+  const prompt = `You are researching a ticket from monday.com.
 
-Ticket title: ${event.pulseName ?? '(unknown)'}
+Ticket title: ${itemName}
 Repository: ${repo}
 
-Investigate the repository and produce a research brief covering:
-1. Where in the codebase this change would land (files, modules, functions).
-2. Relevant existing patterns or prior art.
-3. Risks, unknowns, and suggested next steps.
+The ticket title above is the request from the user — treat it as the
+research question. Investigate the repository and produce a brief that
+directly answers it. Cover:
+1. The specific answer or finding (files, configs, values, commands).
+2. Where in the codebase the answer lives (paths + line numbers if helpful).
+3. Any caveats, gotchas, or relevant nearby context.
 
-Keep the brief tight (under ~400 words). Do not modify code.`;
+Do not modify code. Keep the brief tight (under ~400 words).`;
 
   try {
     const agent = await launchAgent({
