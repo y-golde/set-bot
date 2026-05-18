@@ -11,10 +11,8 @@ import {
 import { launchAgent } from '../lib/cursor.js';
 
 const INITIAL_COMMENT = (itemName) => `
-👋 Hey team — I'm here to triage <b>${escapeHtml(itemName)}</b>.<br><br>
-Before I can act, please:<br>
-1. Fill in the <b>Repositories</b> column with the GitHub repo URL.<br>
-2. Reply with <code>SYSTEM OVERRIDE research</code> or <code>SYSTEM OVERRIDE implement</code>.
+👋 Hey team — I'm here to help triage <b>${escapeHtml(itemName)}</b>.<br><br>
+Please fill in the <b>Repositories</b> column with the GitHub repo URL, then a maintainer will kick off <b>research</b> or <b>implement</b> from here.
 `.trim();
 
 const MISSING_REPO = `⚠️ I couldn't find a repo URL in the <b>Repositories</b> column. Please fill it in and try again.`;
