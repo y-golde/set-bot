@@ -6,6 +6,9 @@
   "engines": {
     "node": ">=20"
   },
+  "dependencies": {
+    "@vercel/functions": "^1.5.0"
+  },
   "scripts": {
     "dev": "vercel dev"
   }

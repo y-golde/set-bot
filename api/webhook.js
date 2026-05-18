@@ -1,3 +1,4 @@
+import { waitUntil } from '@vercel/functions';
 import {
   postUpdate,
   escapeHtml,
@@ -15,7 +16,7 @@ Before I can act, please:<br>
 
 const IMPLEMENT_STUB = `🔧 <b>Implement</b> mode isn't wired up yet — coming in step 3. For now, try <b>research</b>.`;
 
-const MISSING_REPO = `⚠️ I couldn't find a repo URL in the <b>Repositories</b> column. Please fill it in and reply <b>research</b> again.`;
+const MISSING_REPO = `⚠️ I couldn't find a repo URL in the <b>Repositories</b> column. Please fill it in and try again.`;
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
@@ -30,34 +31,47 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  let body;
   try {
-    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-
-    if (body?.challenge) {
-      return res.status(200).json({ challenge: body.challenge });
-    }
-
-    const event = body?.event;
-    const type = event?.type;
-
-
-    if (type === 'create_pulse') {
-      await postUpdate(event.pulseId, INITIAL_COMMENT(event.pulseName ?? 'this item'));
-      console.log(`[monday-bot] Triage prompt posted on item ${event.pulseId}`);
-    } else if (type === 'create_update' || type === 'create_reply') {
-      await handleReply(event, req);
-    } else {
-      console.log(`[monday-bot] Ignoring event type: ${type ?? 'unknown'}`);
-    }
-
-    return res.status(200).json({ ok: true });
+    body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
   } catch (err) {
-    console.error('[monday-bot] Error handling webhook:', err);
-    return res.status(200).json({ ok: true, warning: 'internal error logged' });
+    console.error('[monday-bot] Bad JSON body:', err);
+    return res.status(200).json({ ok: true });
   }
+
+  if (body?.challenge) {
+    return res.status(200).json({ challenge: body.challenge });
+  }
+
+  const event = body?.event;
+  const type = event?.type;
+  const host = req.headers.host;
+
+  // Hand the heavy work to waitUntil and return 200 immediately so monday
+  // doesn't retry while we're talking to Cursor.
+  waitUntil(
+    processEvent(type, event, host).catch((err) => {
+      console.error('[monday-bot] Background processing error:', err);
+    })
+  );
+
+  return res.status(200).json({ ok: true });
 }
 
-async function handleReply(event, req) {
+async function processEvent(type, event, host) {
+  if (type === 'create_pulse') {
+    await postUpdate(event.pulseId, INITIAL_COMMENT(event.pulseName ?? 'this item'));
+    console.log(`[monday-bot] Triage prompt posted on item ${event.pulseId}`);
+    return;
+  }
+  if (type === 'create_update' || type === 'create_reply') {
+    await handleReply(event, host);
+    return;
+  }
+  console.log(`[monday-bot] Ignoring event type: ${type ?? 'unknown'}`);
+}
+
+async function handleReply(event, host) {
   const itemId = event.pulseId;
   const text = stripHtml(event.body ?? event.textBody ?? '');
 
@@ -70,31 +84,31 @@ async function handleReply(event, req) {
     return;
   }
   const command = match[1].toLowerCase();
-  const wantsResearch = command === 'research';
-  const wantsImplement = command === 'implement';
 
-  if (!wantsResearch && !wantsImplement) {
+  if (command === 'implement') {
+    await postUpdate(itemId, IMPLEMENT_STUB);
+    return;
+  }
+  if (command !== 'research') {
     console.log(`[monday-bot] Unknown command "${command}" on item ${itemId}`);
     return;
   }
 
-  if (wantsImplement) {
-    await postUpdate(itemId, IMPLEMENT_STUB);
-    return;
-  }
-
-  // research mode
   const repo = await getRepoUrl(itemId);
   if (!repo) {
     await postUpdate(itemId, MISSING_REPO);
     return;
   }
 
-  const callbackBase = `https://${req.headers.host}`;
-  const callbackUrl = `${callbackBase}/api/cursor-webhook?itemId=${encodeURIComponent(itemId)}`;
+  // Acknowledge first so the user sees activity even if Cursor is slow.
+  await postUpdate(
+    itemId,
+    `🔬 Kicking off a research agent against <a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a>. I'll post the agent link once it spins up.`
+  );
 
-  const item = event.pulseName ? `"${event.pulseName}"` : `monday item ${itemId}`;
-  const prompt = `You are researching a ticket from monday.com (${item}).
+  const callbackUrl = `https://${host}/api/cursor-webhook?itemId=${encodeURIComponent(itemId)}`;
+  const itemLabel = event.pulseName ? `"${event.pulseName}"` : `monday item ${itemId}`;
+  const prompt = `You are researching a ticket from monday.com (${itemLabel}).
 
 Ticket title: ${event.pulseName ?? '(unknown)'}
 Repository: ${repo}
@@ -106,18 +120,23 @@ Investigate the repository and produce a research brief covering:
 
 Keep the brief tight (under ~400 words). Do not modify code.`;
 
-  const agent = await launchAgent({
-    prompt,
-    repository: repo,
-    webhookUrl: callbackUrl,
-  });
-
-  const agentUrl = agent?.target?.url ?? agent?.url ?? `https://cursor.com/agents/${agent?.id ?? ''}`;
-  await postUpdate(
-    itemId,
-    `🔬 Spinning up a research agent against <a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a>.<br>` +
-    `Live progress: <a href="${escapeHtml(agentUrl)}">${escapeHtml(agentUrl)}</a><br><br>` +
-    `I'll post the brief here when it's done.`
-  );
-  console.log(`[monday-bot] Launched Cursor agent ${agent?.id} for item ${itemId}`);
+  try {
+    const agent = await launchAgent({
+      prompt,
+      repository: repo,
+      webhookUrl: callbackUrl,
+    });
+    const agentUrl = agent?.target?.url ?? agent?.url ?? `https://cursor.com/agents/${agent?.id ?? ''}`;
+    await postUpdate(
+      itemId,
+      `🚀 Research agent is running.<br>Live progress: <a href="${escapeHtml(agentUrl)}">${escapeHtml(agentUrl)}</a>`
+    );
+    console.log(`[monday-bot] Launched Cursor agent ${agent?.id} for item ${itemId}`);
+  } catch (err) {
+    console.error('[monday-bot] Cursor launch failed:', err);
+    await postUpdate(
+      itemId,
+      `❌ Couldn't launch the research agent: <code>${escapeHtml(err.message ?? String(err))}</code>`
+    );
+  }
 }
