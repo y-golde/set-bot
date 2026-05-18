@@ -171,7 +171,7 @@ async function handleReply(event, host) {
       prompt,
       repository: repo,
       webhookUrl: callbackUrl,
-      model: process.env.CURSOR_MODEL || 'gpt-5.5-medium',
+      model: process.env.CURSOR_MODEL || 'gpt-5.5-high',
       autoCreatePR: mode.autoCreatePR,
     });
     const agentUrl = agent?.target?.url ?? agent?.url ?? `https://cursor.com/agents/${agent?.id ?? ''}`;
