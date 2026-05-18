@@ -6,6 +6,7 @@ import {
   getItemContext,
   formatItemContext,
   extractRepoUrl,
+  getBotUserId,
 } from '../lib/monday.js';
 import { launchAgent } from '../lib/cursor.js';
 
@@ -142,6 +143,17 @@ async function handleReply(event, host) {
     console.log(`[monday-bot] No SYSTEM OVERRIDE in reply on item ${itemId}`);
     return;
   }
+
+  // SYSTEM OVERRIDE only works when sent from the bot's own monday account
+  // (the user whose API token we're using). Anyone else gets ignored.
+  const botUserId = await getBotUserId();
+  if (!botUserId || String(event.userId ?? '') !== botUserId) {
+    console.log(
+      `[monday-bot] SYSTEM OVERRIDE from non-bot user ${event.userId} (bot=${botUserId}) — ignoring`
+    );
+    return;
+  }
+
   const command = match[1].toLowerCase();
   const mode = MODES[command];
   if (!mode) {
