@@ -1,0 +1,12 @@
+{
+  "name": "monday-bot-vercel",
+  "version": "0.1.0",
+  "description": "monday.com webhook bot — posts triage comments, triggers Cursor agents",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vercel dev"
+  }
+}
