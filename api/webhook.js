@@ -41,12 +41,19 @@ export default async function handler(req, res) {
     const event = body?.event;
     const type = event?.type;
 
-    // Loop prevention: ignore anything authored by the bot itself
-    if (event?.userId) {
+    // Loop prevention: ignore anything authored by the bot itself.
+    // Disable by setting DISABLE_SELF_CHECK=true (useful when the bot's token
+    // belongs to a real human who also posts replies for testing).
+    if (event?.userId && process.env.DISABLE_SELF_CHECK !== 'true') {
       const botId = await getBotUserId();
       if (botId && String(event.userId) === botId) {
-        console.log('[monday-bot] Skipping self-authored event');
-        return res.status(200).json({ ok: true });
+        // Don't loop on the bot's *own* updates — recognize them by body prefix
+        const text = stripHtml(event.body ?? event.textBody ?? '');
+        const isBotComment = /^(👋 Hey team|🔬 Spinning up|✅ Research complete|❌ Research agent|🔧|⚠️)/.test(text);
+        if (isBotComment) {
+          console.log('[monday-bot] Skipping self-authored bot comment');
+          return res.status(200).json({ ok: true });
+        }
       }
     }
 
