@@ -16,9 +16,71 @@ Before I can act, please:<br>
 2. Reply with <code>SYSTEM OVERRIDE research</code> or <code>SYSTEM OVERRIDE implement</code>.
 `.trim();
 
-const IMPLEMENT_STUB = `🔧 <b>Implement</b> mode isn't wired up yet — coming in step 3. For now, try <b>research</b>.`;
-
 const MISSING_REPO = `⚠️ I couldn't find a repo URL in the <b>Repositories</b> column. Please fill it in and try again.`;
+
+const MODES = {
+  research: {
+    emoji: '🔬',
+    label: 'research',
+    ackVerb: 'Kicking off a research agent',
+    autoCreatePR: false,
+    buildPrompt: ({ itemName, repo, contextBlock }) => `You are researching a ticket from monday.com.
+
+Ticket title: ${itemName}
+Repository: ${repo}
+
+Full ticket context (column values + conversation history):
+---
+${contextBlock || '(no additional context)'}
+---
+
+Treat the ticket title, column values, and conversation above as the
+combined request from the team. Investigate the repository and produce
+a brief that directly answers it. Cover:
+1. The specific answer or finding (files, configs, values, commands).
+2. Where in the codebase the answer lives (paths + line numbers if helpful).
+3. Any caveats, gotchas, or relevant nearby context.
+
+Note: comments starting with "SYSTEM OVERRIDE" are bot triggers, not
+part of the question. Bot status comments (🔬, 🚀, ✅, ❌, ⚠️, 🔧, 👋)
+can also be ignored.
+
+Do not modify code. Keep the brief tight (under ~400 words).`,
+  },
+  implement: {
+    emoji: '🔧',
+    label: 'implement',
+    ackVerb: 'Kicking off an implementation agent',
+    autoCreatePR: true,
+    buildPrompt: ({ itemName, repo, contextBlock }) => `You are implementing a ticket from monday.com.
+
+Ticket title: ${itemName}
+Repository: ${repo}
+
+Full ticket context (column values + conversation history):
+---
+${contextBlock || '(no additional context)'}
+---
+
+Treat the ticket title, column values, and conversation above as the
+combined request from the team. Implement the change in the repository:
+1. Read the relevant files to understand the existing patterns.
+2. Make the minimum set of code changes needed to satisfy the request.
+3. Run/lint/test where appropriate; fix anything you break.
+4. Commit on a new branch and open a pull request.
+
+The PR description should restate the request, summarize what changed
+and why, and list any follow-ups or caveats. Link back to the monday
+ticket title at the top of the PR description.
+
+Note: comments starting with "SYSTEM OVERRIDE" are bot triggers, not
+part of the question. Bot status comments (🔬, 🚀, ✅, ❌, ⚠️, 🔧, 👋)
+can also be ignored.
+
+If the request is ambiguous or you cannot proceed safely, stop and
+explain what you need rather than guessing.`,
+  },
+};
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
@@ -49,8 +111,6 @@ export default async function handler(req, res) {
   const type = event?.type;
   const host = req.headers.host;
 
-  // Hand the heavy work to waitUntil and return 200 immediately so monday
-  // doesn't retry while we're talking to Cursor.
   waitUntil(
     processEvent(type, event, host).catch((err) => {
       console.error('[monday-bot] Background processing error:', err);
@@ -77,26 +137,18 @@ async function handleReply(event, host) {
   const itemId = event.pulseId;
   const text = stripHtml(event.body ?? event.textBody ?? '');
 
-  // Strict trigger: only act when the user explicitly opts in.
-  // This also kills the bot-replying-to-itself loop, since the bot never
-  // starts its own comments with this phrase.
   const match = text.match(/^\s*SYSTEM\s+OVERRIDE\s+(\w+)/i);
   if (!match) {
     console.log(`[monday-bot] No SYSTEM OVERRIDE in reply on item ${itemId}`);
     return;
   }
   const command = match[1].toLowerCase();
-
-  if (command === 'implement') {
-    await postUpdate(itemId, IMPLEMENT_STUB);
-    return;
-  }
-  if (command !== 'research') {
+  const mode = MODES[command];
+  if (!mode) {
     console.log(`[monday-bot] Unknown command "${command}" on item ${itemId}`);
     return;
   }
 
-  // Fetch the full item with columns + update/reply history.
   const item = await getItemContext(itemId);
   const repo = extractRepoUrl(item);
   if (!repo) {
@@ -106,35 +158,13 @@ async function handleReply(event, host) {
   const itemName = item?.name ?? event.pulseName ?? '(unknown)';
   const contextBlock = formatItemContext(item);
 
-  // Acknowledge first so the user sees activity even if Cursor is slow.
   await postUpdate(
     itemId,
-    `🔬 Kicking off a research agent against <a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a>. I'll post the agent link once it spins up.`
+    `${mode.emoji} ${mode.ackVerb} against <a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a>. I'll post the agent link once it spins up.`
   );
 
-  const callbackUrl = `https://${host}/api/cursor-webhook?itemId=${encodeURIComponent(itemId)}`;
-  const prompt = `You are researching a ticket from monday.com.
-
-Ticket title: ${itemName}
-Repository: ${repo}
-
-Full ticket context (column values + conversation history):
----
-${contextBlock || '(no additional context)'}
----
-
-Treat the ticket title, column values, and conversation above as the
-combined request from the team. Investigate the repository and produce
-a brief that directly answers it. Cover:
-1. The specific answer or finding (files, configs, values, commands).
-2. Where in the codebase the answer lives (paths + line numbers if helpful).
-3. Any caveats, gotchas, or relevant nearby context.
-
-Note: comments starting with "SYSTEM OVERRIDE" are bot triggers, not
-part of the question. Bot status comments (🔬, 🚀, ✅, ❌, ⚠️, 🔧, 👋)
-can also be ignored.
-
-Do not modify code. Keep the brief tight (under ~400 words).`;
+  const callbackUrl = `https://${host}/api/cursor-webhook?itemId=${encodeURIComponent(itemId)}&mode=${mode.label}`;
+  const prompt = mode.buildPrompt({ itemName, repo, contextBlock });
 
   try {
     const agent = await launchAgent({
@@ -142,18 +172,19 @@ Do not modify code. Keep the brief tight (under ~400 words).`;
       repository: repo,
       webhookUrl: callbackUrl,
       model: process.env.CURSOR_MODEL || 'gpt-5.5-medium',
+      autoCreatePR: mode.autoCreatePR,
     });
     const agentUrl = agent?.target?.url ?? agent?.url ?? `https://cursor.com/agents/${agent?.id ?? ''}`;
     await postUpdate(
       itemId,
-      `🚀 Research agent is running.<br>Live progress: <a href="${escapeHtml(agentUrl)}">${escapeHtml(agentUrl)}</a>`
+      `🚀 ${mode.label[0].toUpperCase() + mode.label.slice(1)} agent is running.<br>Live progress: <a href="${escapeHtml(agentUrl)}">${escapeHtml(agentUrl)}</a>`
     );
-    console.log(`[monday-bot] Launched Cursor agent ${agent?.id} for item ${itemId}`);
+    console.log(`[monday-bot] Launched Cursor ${mode.label} agent ${agent?.id} for item ${itemId}`);
   } catch (err) {
-    console.error('[monday-bot] Cursor launch failed:', err);
+    console.error(`[monday-bot] Cursor ${mode.label} launch failed:`, err);
     await postUpdate(
       itemId,
-      `❌ Couldn't launch the research agent: <code>${escapeHtml(err.message ?? String(err))}</code>`
+      `❌ Couldn't launch the ${mode.label} agent: <code>${escapeHtml(err.message ?? String(err))}</code>`
     );
   }
 }
