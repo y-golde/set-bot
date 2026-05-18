@@ -141,6 +141,7 @@ Do not modify code. Keep the brief tight (under ~400 words).`;
       prompt,
       repository: repo,
       webhookUrl: callbackUrl,
+      model: process.env.CURSOR_MODEL || 'gpt-5.5-medium',
     });
     const agentUrl = agent?.target?.url ?? agent?.url ?? `https://cursor.com/agents/${agent?.id ?? ''}`;
     await postUpdate(
