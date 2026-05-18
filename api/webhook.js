@@ -3,7 +3,8 @@ import {
   postUpdate,
   escapeHtml,
   stripHtml,
-  getItemWithColumns,
+  getItemContext,
+  formatItemContext,
   extractRepoUrl,
 } from '../lib/monday.js';
 import { launchAgent } from '../lib/cursor.js';
@@ -95,14 +96,15 @@ async function handleReply(event, host) {
     return;
   }
 
-  // Fetch the full item — replies don't include the item name in the payload.
-  const item = await getItemWithColumns(itemId);
+  // Fetch the full item with columns + update/reply history.
+  const item = await getItemContext(itemId);
   const repo = extractRepoUrl(item);
   if (!repo) {
     await postUpdate(itemId, MISSING_REPO);
     return;
   }
   const itemName = item?.name ?? event.pulseName ?? '(unknown)';
+  const contextBlock = formatItemContext(item);
 
   // Acknowledge first so the user sees activity even if Cursor is slow.
   await postUpdate(
@@ -116,12 +118,21 @@ async function handleReply(event, host) {
 Ticket title: ${itemName}
 Repository: ${repo}
 
-The ticket title above is the request from the user — treat it as the
-research question. Investigate the repository and produce a brief that
-directly answers it. Cover:
+Full ticket context (column values + conversation history):
+---
+${contextBlock || '(no additional context)'}
+---
+
+Treat the ticket title, column values, and conversation above as the
+combined request from the team. Investigate the repository and produce
+a brief that directly answers it. Cover:
 1. The specific answer or finding (files, configs, values, commands).
 2. Where in the codebase the answer lives (paths + line numbers if helpful).
 3. Any caveats, gotchas, or relevant nearby context.
+
+Note: comments starting with "SYSTEM OVERRIDE" are bot triggers, not
+part of the question. Bot status comments (🔬, 🚀, ✅, ❌, ⚠️, 🔧, 👋)
+can also be ignored.
 
 Do not modify code. Keep the brief tight (under ~400 words).`;
 
