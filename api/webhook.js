@@ -1,16 +1,31 @@
-import { postUpdate, escapeHtml } from '../lib/monday.js';
+import {
+  postUpdate,
+  escapeHtml,
+  stripHtml,
+  getRepoUrl,
+  getBotUserId,
+} from '../lib/monday.js';
+import { launchAgent } from '../lib/cursor.js';
+
+const INITIAL_COMMENT = (itemName) => `
+👋 Hey team — I'm here to triage <b>${escapeHtml(itemName)}</b>.<br><br>
+Before I can act, please:<br>
+1. Fill in the <b>Repositories</b> column with the GitHub repo URL.<br>
+2. Reply to this update with <b>research</b> or <b>implement</b>.
+`.trim();
+
+const IMPLEMENT_STUB = `🔧 <b>Implement</b> mode isn't wired up yet — coming in step 3. For now, try <b>research</b>.`;
+
+const MISSING_REPO = `⚠️ I couldn't find a repo URL in the <b>Repositories</b> column. Please fill it in and reply <b>research</b> again.`;
 
 export default async function handler(req, res) {
-  // Browser sanity check
   if (req.method === 'GET') {
     return res.status(200).json({ ok: true, service: 'monday-bot' });
   }
-
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Optional shared-secret guard via ?secret= query param
   const secret = process.env.WEBHOOK_SHARED_SECRET;
   if (secret && req.query.secret !== secret) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -19,29 +34,90 @@ export default async function handler(req, res) {
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
 
-    // monday.com webhook verification handshake
     if (body?.challenge) {
       return res.status(200).json({ challenge: body.challenge });
     }
 
     const event = body?.event;
+    const type = event?.type;
 
-    if (event?.type === 'create_pulse') {
-      const itemId = String(event.pulseId);
-      const itemName = escapeHtml(event.pulseName ?? 'this item');
-      const comment = `Hey team 👋 — quick triage on <b>${itemName}</b>: should this be <b>research</b> or <b>implement</b>?`;
-
-      await postUpdate(itemId, comment);
-      console.log(`[monday-bot] Posted triage comment on item ${itemId}`);
-    } else {
-      console.log(`[monday-bot] Ignoring event type: ${event?.type ?? 'unknown'}`);
+    // Loop prevention: ignore anything authored by the bot itself
+    if (event?.userId) {
+      const botId = await getBotUserId();
+      if (botId && String(event.userId) === botId) {
+        console.log('[monday-bot] Skipping self-authored event');
+        return res.status(200).json({ ok: true });
+      }
     }
 
-    // Always 200 — monday retries on anything else, causing storms
+    if (type === 'create_pulse') {
+      await postUpdate(event.pulseId, INITIAL_COMMENT(event.pulseName ?? 'this item'));
+      console.log(`[monday-bot] Triage prompt posted on item ${event.pulseId}`);
+    } else if (type === 'create_update' || type === 'create_reply') {
+      await handleReply(event, req);
+    } else {
+      console.log(`[monday-bot] Ignoring event type: ${type ?? 'unknown'}`);
+    }
+
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('[monday-bot] Error handling webhook:', err);
-    // Still 200 to prevent monday retry storms
     return res.status(200).json({ ok: true, warning: 'internal error logged' });
   }
+}
+
+async function handleReply(event, req) {
+  const itemId = event.pulseId;
+  const text = stripHtml(event.body ?? event.textBody ?? '').toLowerCase();
+
+  const wantsResearch = /\bresearch\b/.test(text);
+  const wantsImplement = /\bimplement\b/.test(text);
+
+  if (!wantsResearch && !wantsImplement) {
+    console.log(`[monday-bot] No keyword match in reply on item ${itemId}`);
+    return;
+  }
+
+  if (wantsImplement) {
+    await postUpdate(itemId, IMPLEMENT_STUB);
+    return;
+  }
+
+  // research mode
+  const repo = await getRepoUrl(itemId);
+  if (!repo) {
+    await postUpdate(itemId, MISSING_REPO);
+    return;
+  }
+
+  const callbackBase = `https://${req.headers.host}`;
+  const callbackUrl = `${callbackBase}/api/cursor-webhook?itemId=${encodeURIComponent(itemId)}`;
+
+  const item = event.pulseName ? `"${event.pulseName}"` : `monday item ${itemId}`;
+  const prompt = `You are researching a ticket from monday.com (${item}).
+
+Ticket title: ${event.pulseName ?? '(unknown)'}
+Repository: ${repo}
+
+Investigate the repository and produce a research brief covering:
+1. Where in the codebase this change would land (files, modules, functions).
+2. Relevant existing patterns or prior art.
+3. Risks, unknowns, and suggested next steps.
+
+Keep the brief tight (under ~400 words). Do not modify code.`;
+
+  const agent = await launchAgent({
+    prompt,
+    repository: repo,
+    webhookUrl: callbackUrl,
+  });
+
+  const agentUrl = agent?.target?.url ?? agent?.url ?? `https://cursor.com/agents/${agent?.id ?? ''}`;
+  await postUpdate(
+    itemId,
+    `🔬 Spinning up a research agent against <a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a>.<br>` +
+    `Live progress: <a href="${escapeHtml(agentUrl)}">${escapeHtml(agentUrl)}</a><br><br>` +
+    `I'll post the brief here when it's done.`
+  );
+  console.log(`[monday-bot] Launched Cursor agent ${agent?.id} for item ${itemId}`);
 }
