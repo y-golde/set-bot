@@ -9,6 +9,7 @@ import {
   getBotUserId,
 } from '../lib/monday.js';
 import { launchAgent } from '../lib/cursor.js';
+import { postAgentResult, findMostRecentAgent } from '../lib/result.js';
 
 const INITIAL_COMMENT = (itemName) => `
 👋 Hey team — I'm here to help triage <b>${escapeHtml(itemName)}</b>.<br><br>
@@ -151,6 +152,19 @@ async function handleReply(event, host) {
   }
 
   const command = match[1].toLowerCase();
+
+  // "status" — find the most recent agent on this ticket and post its result.
+  if (command === 'status') {
+    const item = await getItemContext(itemId);
+    const found = findMostRecentAgent(item);
+    if (!found) {
+      await postUpdate(itemId, `⚠️ No previous agent found on this ticket.`);
+      return;
+    }
+    await postAgentResult({ itemId, agentId: found.agentId, mode: found.mode, force: true });
+    return;
+  }
+
   const mode = MODES[command];
   if (!mode) {
     console.log(`[monday-bot] Unknown command "${command}" on item ${itemId}`);
