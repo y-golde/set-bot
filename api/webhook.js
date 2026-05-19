@@ -144,21 +144,21 @@ async function handleReply(event, host) {
   const itemId = event.pulseId;
   const text = stripHtml(event.body ?? event.textBody ?? '');
 
-  const match = text.match(/^\s*SYSTEM\s+OVERRIDE\s+(\w+)/i);
+  const match = text.match(/^\s*#(\w+)/);
   if (!match) {
     console.log(
-      `[monday-bot] No SYSTEM OVERRIDE in reply on item ${itemId}. ` +
+      `[monday-bot] No #command in reply on item ${itemId}. ` +
       `Raw text (first 200 chars): ${JSON.stringify(text.slice(0, 200))}`
     );
     return;
   }
 
-  // SYSTEM OVERRIDE only works when sent from the bot's own monday account
+  // Commands only work when sent from the bot's own monday account
   // (the user whose API token we're using). Anyone else gets ignored.
   const botUserId = await getBotUserId();
   if (!botUserId || String(event.userId ?? '') !== botUserId) {
     console.log(
-      `[monday-bot] SYSTEM OVERRIDE from non-bot user ${event.userId} (bot=${botUserId}) — ignoring`
+      `[monday-bot] #command from non-bot user ${event.userId} (bot=${botUserId}) — ignoring`
     );
     return;
   }
