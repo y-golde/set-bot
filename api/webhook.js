@@ -146,7 +146,10 @@ async function handleReply(event, host) {
 
   const match = text.match(/^\s*SYSTEM\s+OVERRIDE\s+(\w+)/i);
   if (!match) {
-    console.log(`[monday-bot] No SYSTEM OVERRIDE in reply on item ${itemId}`);
+    console.log(
+      `[monday-bot] No SYSTEM OVERRIDE in reply on item ${itemId}. ` +
+      `Raw text (first 200 chars): ${JSON.stringify(text.slice(0, 200))}`
+    );
     return;
   }
 
