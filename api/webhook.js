@@ -25,7 +25,12 @@ const sign = (mood) => {
 
 const INITIAL_COMMENT = (itemName) => `
 🐕 Hi! I'm <b>Set</b> — I help triage <b>${escapeHtml(itemName)}</b>.<br><br>
-Please fill in the <b>Repositories</b> column with the GitHub repo URL, then a maintainer will kick off research or implement from here.${sign('happy')}
+Fill in the <b>Repositories</b> column with the GitHub repo URL, then reply with one of:<br>
+• <code>!set research</code> — I'll spin up a Cursor agent to investigate the question and post a brief here.<br>
+• <code>!set implement</code> — I'll spin up a Cursor agent to make the code changes and open a PR.<br>
+• <code>!set status</code> — re-post the latest agent's progress / result.<br>
+• <code>!set help</code> — show the full command list.<br><br>
+Anyone on this board can use the commands — go ahead!${sign('happy')}
 `.trim();
 
 const HELP_COMMENT = `
