@@ -68,7 +68,7 @@ async function maybePostAgentUrl({ itemId, agentId, mode, webhookBody, notifyEma
   const label = mode === 'implement' ? 'Implementation' : 'Research';
   await notify(
     itemId,
-    `🚀 ${label} agent is running.<br>Live progress: <a href="${escapeHtml(agentUrl)}">${escapeHtml(agentUrl)}</a>`,
+    `🚀 ${label} agent is running.<br>Live progress: <a href="${escapeHtml(agentUrl)}">${escapeHtml(agentUrl)}</a> 🐕 bark!`,
     notifyEmail
   );
   console.log(`[cursor-webhook] Announced agent ${agentId} on item ${itemId}`);
