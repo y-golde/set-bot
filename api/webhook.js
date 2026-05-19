@@ -40,6 +40,10 @@ a brief that directly answers it. Cover:
 2. Where in the codebase the answer lives (paths + line numbers if helpful).
 3. Any caveats, gotchas, or relevant nearby context.
 
+You have access to a Coralogix MCP server. Use it whenever the question
+involves production logs, errors, runtime behavior, or service metrics —
+query Coralogix directly instead of guessing from the code.
+
 Note: comments starting with "SYSTEM OVERRIDE" are bot triggers, not
 part of the question. Bot status comments (🔬, 🚀, ✅, ❌, ⚠️, 🔧, 👋)
 can also be ignored.
@@ -70,6 +74,11 @@ combined request from the team. Implement the change in the repository:
 The PR description should restate the request, summarize what changed
 and why, and list any follow-ups or caveats. Link back to the monday
 ticket title at the top of the PR description.
+
+You have access to a Coralogix MCP server. Use it whenever the task
+requires understanding production logs, errors, runtime behavior, or
+service metrics before changing code — query Coralogix directly
+instead of guessing.
 
 Note: comments starting with "SYSTEM OVERRIDE" are bot triggers, not
 part of the question. Bot status comments (🔬, 🚀, ✅, ❌, ⚠️, 🔧, 👋)
@@ -193,7 +202,7 @@ async function handleReply(event, host) {
       prompt,
       repository: repo,
       webhookUrl: callbackUrl,
-      model: process.env.CURSOR_MODEL || 'gpt-5.5-high',
+      model: process.env.CURSOR_MODEL || 'composer-2.5-fast',
     });
     const agentUrl = agent?.target?.url ?? agent?.url ?? `https://cursor.com/agents/${agent?.id ?? ''}`;
     await postUpdate(
