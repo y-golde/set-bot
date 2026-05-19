@@ -7,9 +7,11 @@ import {
   formatItemContext,
   extractRepoUrl,
   getBotUserId,
+  getUserEmail,
 } from '../lib/monday.js';
 import { launchAgent } from '../lib/cursor.js';
 import { postAgentResult, findMostRecentAgent } from '../lib/result.js';
+import { notify } from '../lib/notify.js';
 
 const INITIAL_COMMENT = (itemName) => `
 👋 Hey team — I'm here to help triage <b>${escapeHtml(itemName)}</b>.<br><br>
@@ -164,16 +166,24 @@ async function handleReply(event, host) {
   }
 
   const command = match[1].toLowerCase();
+  const triggerUserId = event.userId ?? null;
+  const triggerEmail = await getUserEmail(triggerUserId).catch(() => null);
 
   // "status" — find the most recent agent on this ticket and post its result.
   if (command === 'status') {
     const item = await getItemContext(itemId);
     const found = findMostRecentAgent(item);
     if (!found) {
-      await postUpdate(itemId, `⚠️ No previous agent found on this ticket.`);
+      await notify(itemId, `⚠️ No previous agent found on this ticket.`, triggerEmail);
       return;
     }
-    await postAgentResult({ itemId, agentId: found.agentId, mode: found.mode, force: true });
+    await postAgentResult({
+      itemId,
+      agentId: found.agentId,
+      mode: found.mode,
+      force: true,
+      notifyEmail: triggerEmail,
+    });
     return;
   }
 
@@ -186,18 +196,23 @@ async function handleReply(event, host) {
   const item = await getItemContext(itemId);
   const repo = extractRepoUrl(item);
   if (!repo) {
-    await postUpdate(itemId, MISSING_REPO);
+    await notify(itemId, MISSING_REPO, triggerEmail);
     return;
   }
   const itemName = item?.name ?? event.pulseName ?? '(unknown)';
   const contextBlock = formatItemContext(item);
 
-  await postUpdate(
+  await notify(
     itemId,
-    `${mode.emoji} ${mode.ackVerb} against <a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a>. I'll post the agent link once it spins up.`
+    `${mode.emoji} ${mode.ackVerb} against <a href="${escapeHtml(repo)}">${escapeHtml(repo)}</a>. I'll post the agent link once it spins up.`,
+    triggerEmail
   );
 
-  const callbackUrl = `https://${host}/api/cursor-webhook?itemId=${encodeURIComponent(itemId)}&mode=${mode.label}`;
+  // Pass triggerUserId through so cursor-webhook can DM the same user on completion.
+  const callbackUrl = `https://${host}/api/cursor-webhook` +
+    `?itemId=${encodeURIComponent(itemId)}` +
+    `&mode=${mode.label}` +
+    (triggerUserId ? `&userId=${encodeURIComponent(triggerUserId)}` : '');
   const prompt = mode.buildPrompt({ itemName, repo, contextBlock });
 
   try {
@@ -208,26 +223,26 @@ async function handleReply(event, host) {
       model: process.env.CURSOR_MODEL || 'composer-2.5-fast',
     });
     const agentUrl = agent?.target?.url ?? agent?.url ?? `https://cursor.com/agents/${agent?.id ?? ''}`;
-    await postUpdate(
+    await notify(
       itemId,
-      `🚀 ${mode.label[0].toUpperCase() + mode.label.slice(1)} agent is running.<br>Live progress: <a href="${escapeHtml(agentUrl)}">${escapeHtml(agentUrl)}</a>`
+      `🚀 ${mode.label[0].toUpperCase() + mode.label.slice(1)} agent is running.<br>Live progress: <a href="${escapeHtml(agentUrl)}">${escapeHtml(agentUrl)}</a>`,
+      triggerEmail
     );
     console.log(`[monday-bot] Launched Cursor ${mode.label} agent ${agent?.id} for item ${itemId}`);
   } catch (err) {
     console.error(`[monday-bot] Cursor ${mode.label} launch failed:`, err);
-    // Timeouts (AbortError) usually mean the agent WAS created but Cursor
-    // didn't return the response in time. Tell the user that instead of
-    // claiming the launch failed.
     const isTimeout = err?.name === 'AbortError' || /aborted|timeout/i.test(err?.message ?? '');
     if (isTimeout) {
-      await postUpdate(
+      await notify(
         itemId,
-        `⏳ ${mode.label[0].toUpperCase() + mode.label.slice(1)} agent was submitted, but Cursor didn't respond with the agent URL in time. It's almost certainly running. I'll post the result automatically when it finishes, or you can reply <code>SYSTEM OVERRIDE status</code> for an update.`
+        `⏳ ${mode.label[0].toUpperCase() + mode.label.slice(1)} agent was submitted, but Cursor didn't respond with the agent URL in time. It's almost certainly running. I'll post the result automatically when it finishes, or reply <code>#status</code> for an update.`,
+        triggerEmail
       );
     } else {
-      await postUpdate(
+      await notify(
         itemId,
-        `❌ Couldn't launch the ${mode.label} agent: <code>${escapeHtml(err.message ?? String(err))}</code>`
+        `❌ Couldn't launch the ${mode.label} agent: <code>${escapeHtml(err.message ?? String(err))}</code>`,
+        triggerEmail
       );
     }
   }

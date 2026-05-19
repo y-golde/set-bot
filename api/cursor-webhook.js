@@ -1,10 +1,11 @@
 import { waitUntil } from '@vercel/functions';
 import { postAgentResult } from '../lib/result.js';
-import { postUpdate, escapeHtml, getItemContext } from '../lib/monday.js';
+import { escapeHtml, getItemContext, getUserEmail } from '../lib/monday.js';
+import { notify } from '../lib/notify.js';
 
 // Cursor calls this when a background agent finishes.
 // Query string from the launch URL carries:
-//   ?itemId=<monday item id>&mode=<research|implement>
+//   ?itemId=<monday item id>&mode=<research|implement>&userId=<monday user id>
 export default async function handler(req, res) {
   if (req.method === 'GET') {
     return res.status(200).json({ ok: true, service: 'monday-bot-cursor-callback' });
@@ -22,9 +23,10 @@ export default async function handler(req, res) {
 
   const itemId = req.query.itemId;
   const mode = (req.query.mode === 'implement') ? 'implement' : 'research';
+  const userId = req.query.userId ?? null;
   const agentId = body?.id ?? body?.agentId ?? body?.agent?.id;
 
-  console.log(`[cursor-webhook] item=${itemId} agent=${agentId} mode=${mode} body=${JSON.stringify(body).slice(0, 500)}`);
+  console.log(`[cursor-webhook] item=${itemId} agent=${agentId} mode=${mode} userId=${userId} body=${JSON.stringify(body).slice(0, 500)}`);
 
   if (!itemId || !agentId) {
     return res.status(200).json({ ok: true, warning: 'missing itemId or agentId' });
@@ -37,11 +39,11 @@ export default async function handler(req, res) {
 
   waitUntil(
     (async () => {
+      const notifyEmail = userId ? await getUserEmail(userId).catch(() => null) : null;
       if (isTerminal) {
-        await postAgentResult({ itemId, agentId, mode, webhookBody: body });
+        await postAgentResult({ itemId, agentId, mode, webhookBody: body, notifyEmail });
       } else {
-        // First non-terminal event we receive — post the agent URL once.
-        await maybePostAgentUrl({ itemId, agentId, mode, webhookBody: body });
+        await maybePostAgentUrl({ itemId, agentId, mode, webhookBody: body, notifyEmail });
       }
     })().catch((err) => console.error('[cursor-webhook] processing failed:', err))
   );
@@ -49,7 +51,7 @@ export default async function handler(req, res) {
   return res.status(200).json({ ok: true });
 }
 
-async function maybePostAgentUrl({ itemId, agentId, mode, webhookBody }) {
+async function maybePostAgentUrl({ itemId, agentId, mode, webhookBody, notifyEmail }) {
   const agentUrl =
     webhookBody?.target?.url ??
     webhookBody?.url ??
@@ -64,9 +66,10 @@ async function maybePostAgentUrl({ itemId, agentId, mode, webhookBody }) {
   }
 
   const label = mode === 'implement' ? 'Implementation' : 'Research';
-  await postUpdate(
+  await notify(
     itemId,
-    `🚀 ${label} agent is running.<br>Live progress: <a href="${escapeHtml(agentUrl)}">${escapeHtml(agentUrl)}</a>`
+    `🚀 ${label} agent is running.<br>Live progress: <a href="${escapeHtml(agentUrl)}">${escapeHtml(agentUrl)}</a>`,
+    notifyEmail
   );
   console.log(`[cursor-webhook] Announced agent ${agentId} on item ${itemId}`);
 }
