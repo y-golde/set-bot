@@ -176,22 +176,11 @@ async function handleReply(event, host) {
     return;
   }
 
-  // Commands work when sent from Set's monday account (the API token owner)
-  // OR from any user explicitly listed in AUTHORIZED_USER_IDS (comma-separated).
-  const botUserId = await getBotUserId();
-  const allowed = new Set([
-    botUserId,
-    ...(process.env.AUTHORIZED_USER_IDS ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-  ]);
-  if (!allowed.has(String(event.userId ?? ''))) {
-    console.log(
-      `[set-bot] !set command from unauthorized user ${event.userId} (allowed=${[...allowed].join(',')}) — ignoring`
-    );
-    return;
-  }
+  // Anyone on the board can issue !set commands. The bot's own updates never
+  // start with "!set", so there's no risk of self-triggering loops.
+  // Loop guard: if the API-token owner posts (e.g. the bot itself), still
+  // allow — !set prefix is the only filter.
+  console.log(`[set-bot] !set command from user ${event.userId} on item ${itemId}`);
 
   const command = match[1].toLowerCase();
   const triggerUserId = event.userId ?? null;
