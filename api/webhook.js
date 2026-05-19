@@ -215,9 +215,20 @@ async function handleReply(event, host) {
     console.log(`[monday-bot] Launched Cursor ${mode.label} agent ${agent?.id} for item ${itemId}`);
   } catch (err) {
     console.error(`[monday-bot] Cursor ${mode.label} launch failed:`, err);
-    await postUpdate(
-      itemId,
-      `❌ Couldn't launch the ${mode.label} agent: <code>${escapeHtml(err.message ?? String(err))}</code>`
-    );
+    // Timeouts (AbortError) usually mean the agent WAS created but Cursor
+    // didn't return the response in time. Tell the user that instead of
+    // claiming the launch failed.
+    const isTimeout = err?.name === 'AbortError' || /aborted|timeout/i.test(err?.message ?? '');
+    if (isTimeout) {
+      await postUpdate(
+        itemId,
+        `⏳ ${mode.label[0].toUpperCase() + mode.label.slice(1)} agent was submitted, but Cursor didn't respond with the agent URL in time. It's almost certainly running. I'll post the result automatically when it finishes, or you can reply <code>SYSTEM OVERRIDE status</code> for an update.`
+      );
+    } else {
+      await postUpdate(
+        itemId,
+        `❌ Couldn't launch the ${mode.label} agent: <code>${escapeHtml(err.message ?? String(err))}</code>`
+      );
+    }
   }
 }

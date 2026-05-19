@@ -30,7 +30,7 @@ export default async function handler(req, res) {
   }
 
   waitUntil(
-    postAgentResult({ itemId, agentId, mode }).catch((err) =>
+    postAgentResult({ itemId, agentId, mode, webhookBody: body }).catch((err) =>
       console.error('[cursor-webhook] post-result failed:', err)
     )
   );
