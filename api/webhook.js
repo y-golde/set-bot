@@ -176,12 +176,19 @@ async function handleReply(event, host) {
     return;
   }
 
-  // Commands only work when sent from Set's monday account
-  // (the user whose API token we're using). Anyone else gets ignored.
+  // Commands work when sent from Set's monday account (the API token owner)
+  // OR from any user explicitly listed in AUTHORIZED_USER_IDS (comma-separated).
   const botUserId = await getBotUserId();
-  if (!botUserId || String(event.userId ?? '') !== botUserId) {
+  const allowed = new Set([
+    botUserId,
+    ...(process.env.AUTHORIZED_USER_IDS ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  ]);
+  if (!allowed.has(String(event.userId ?? ''))) {
     console.log(
-      `[set-bot] !set command from non-Set user ${event.userId} (bot=${botUserId}) — ignoring`
+      `[set-bot] !set command from unauthorized user ${event.userId} (allowed=${[...allowed].join(',')}) — ignoring`
     );
     return;
   }
