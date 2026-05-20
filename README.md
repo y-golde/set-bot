@@ -44,8 +44,6 @@ See [AGENTS.md](AGENTS.md) for a tour of the code layout and the provider contra
 | `POST` | `/api/tickets/jira/webhook` | Jira webhooks |
 | `POST` | `/api/agents/cursor/callback` | Cursor agent status callbacks |
 | `POST` | `/api/agents/anthropic/callback` | Symmetry only — Anthropic is synchronous |
-| `POST` | `/api/webhook` | Back-compat alias for the Monday route |
-| `POST` | `/api/cursor-webhook` | Back-compat alias for the Cursor callback |
 | `GET` | any of the above | Health check |
 
 The handler always returns 200 so the tracker doesn't retry-storm on transient failures — actual work happens in `waitUntil`.

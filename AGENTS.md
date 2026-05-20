@@ -16,8 +16,6 @@ api/
   agents/
     cursor/callback.js    # POST handler for Cursor agent callbacks
     anthropic/callback.js # POST handler for Anthropic (sync — no-op shim)
-  webhook.js              # back-compat: forwards to tickets/monday/webhook
-  cursor-webhook.js       # back-compat: forwards to agents/cursor/callback
 lib/
   dispatch.js             # !set parsing, MODES, command dispatch
   route-helpers.js        # shared POST handlers used by the api/ routes
