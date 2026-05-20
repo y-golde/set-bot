@@ -33,17 +33,17 @@ Add `--agent=<id>` to any command to override the default agent provider for tha
 
 ## Auto-triage (optional)
 
-If you have a tool that knows your org's repos (today: Unblocked via its remote MCP server), Set can guess which repo a new ticket belongs to and offer it back. The user accepts with `!set use`, or just runs `!set research` / `!set implement` and Set auto-accepts the most recent suggestion.
+If you have a tool that knows your org's repos (today: [Unblocked](https://docs.getunblocked.com/api-reference/quickstart)), Set can guess which repo a new ticket belongs to and offer it back. The user accepts with `!set use`, or just runs `!set research` / `!set implement` and Set auto-accepts the most recent suggestion.
 
 Enable it by setting:
 
 ```
 REPO_SUGGESTER=unblocked
-UNBLOCKED_MCP_URL=https://…       # Unblocked remote MCP endpoint
-UNBLOCKED_MCP_TOKEN=…             # bearer token
+UNBLOCKED_API_TOKEN=…             # Personal or Team Access Token from Unblocked
+# UNBLOCKED_API_URL=https://getunblocked.com/api/v1   # optional override
 ```
 
-The suggester is pluggable: add a new file under `lib/providers/repo-suggesters/` for any other MCP-capable tool (Glean, Sourcegraph, etc.) and point `REPO_SUGGESTER` at its id. Default is `noop` (feature off).
+The suggester is pluggable: add a new file under `lib/providers/repo-suggesters/` for any other knowledge tool (Glean, Sourcegraph, etc.) and point `REPO_SUGGESTER` at its id. Default is `noop` (feature off).
 
 ## Architecture
 
