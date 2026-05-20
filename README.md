@@ -129,22 +129,58 @@ npx vercel dev         # http://localhost:3000
 
 ## Environment variables
 
-| Variable | Required for | Description |
-|---|---|---|
-| `AGENT_PROVIDER` | all | Default agent provider — `cursor` or `anthropic`. |
-| `WEBHOOK_SHARED_SECRET` |  | If set, ticket webhook requests must include `?secret=<value>`. |
-| `MONDAY_API_TOKEN` | Monday | Personal API token from monday.com developer settings. |
-| `JIRA_BASE_URL` | Jira | `https://<your-org>.atlassian.net` |
-| `JIRA_EMAIL` | Jira | Email used for Basic auth. |
-| `JIRA_API_TOKEN` | Jira | Token from id.atlassian.com → API tokens. |
-| `JIRA_REPO_FIELD` |  | Custom-field id holding the repo URL (e.g. `customfield_10042`). Optional. |
-| `CURSOR_API_KEY` | Cursor | Cursor Background Agents API key. |
-| `CURSOR_MODEL` |  | Cursor agent model. Defaults to `composer-2.5-fast`. |
-| `ANTHROPIC_API_KEY` | Anthropic | Anthropic API key. |
-| `ANTHROPIC_MODEL` |  | Anthropic model. Defaults to `claude-opus-4-7`. |
-| `DEFAULT_REPO_OWNER` |  | GitHub org/user prefix used when the repo field contains a bare repo name. |
-| `SLACK_BOT_TOKEN` |  | Slack bot token (`xoxb-…`). Enables DMs. Needs `users:read.email` and `chat:write` scopes. |
-| `AUTHORIZED_USER_IDS` |  | Comma-separated user IDs allowed to issue `!set` commands. Currently unused. |
+### Core
+
+| Variable | Description |
+|---|---|
+| `AGENT_PROVIDER` | Default agent provider — `cursor` or `anthropic`. |
+| `WEBHOOK_SHARED_SECRET` | If set, ticket webhook requests must include `?secret=<value>`. |
+
+### Ticket providers
+
+#### Monday
+
+| Variable | Description |
+|---|---|
+| `MONDAY_API_TOKEN` | Personal API token from monday.com developer settings. |
+
+#### Jira
+
+| Variable | Description |
+|---|---|
+| `JIRA_BASE_URL` | `https://<your-org>.atlassian.net` |
+| `JIRA_EMAIL` | Email used for Basic auth. |
+| `JIRA_API_TOKEN` | Token from id.atlassian.com → API tokens. |
+| `JIRA_REPO_FIELD` | Custom-field id holding the repo URL (e.g. `customfield_10042`). Optional. |
+
+### Agent providers
+
+#### Cursor
+
+| Variable | Description |
+|---|---|
+| `CURSOR_API_KEY` | Cursor Background Agents API key. |
+| `CURSOR_MODEL` | Cursor agent model. Defaults to `composer-2.5-fast`. |
+
+#### Anthropic
+
+| Variable | Description |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic API key. |
+| `ANTHROPIC_MODEL` | Anthropic model. Defaults to `claude-opus-4-7`. |
+
+### Repo resolution
+
+| Variable | Description |
+|---|---|
+| `DEFAULT_REPO_OWNER` | GitHub org/user prefix used when the repo field contains a bare repo name. |
+
+### Slack notifications
+
+| Variable | Description |
+|---|---|
+| `SLACK_BOT_TOKEN` | Slack bot token (`xoxb-…`). Enables DMs. Needs `users:read.email` and `chat:write` scopes. |
+| `AUTHORIZED_USER_IDS` | Comma-separated user IDs allowed to issue `!set` commands. Currently unused. |
 
 ---
 
