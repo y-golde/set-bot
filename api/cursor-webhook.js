@@ -1,75 +1,61 @@
-import { waitUntil } from '@vercel/functions';
-import { postAgentResult } from '../lib/result.js';
-import { escapeHtml, getItemContext, getUserEmail } from '../lib/monday.js';
-import { notify } from '../lib/notify.js';
+// Back-compat shim. Cursor callbacks now live at /api/agents/cursor/callback.
+// Existing in-flight agents launched against the old URL still land here.
 
-// Cursor calls this when a background agent finishes.
-// Query string from the launch URL carries:
-//   ?itemId=<monday item id>&mode=<research|implement>&userId=<monday user id>
+import { waitUntil } from '@vercel/functions';
+import { getAgentProvider } from '../lib/providers/agents/index.js';
+import { getTicketProvider } from '../lib/providers/tickets/index.js';
+import { postAgentResult } from '../lib/result.js';
+import { notify } from '../lib/notify.js';
+import { escapeHtml } from '../lib/monday.js';
+
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ ok: true, service: 'set-bot-cursor-callback' });
+    return res.status(200).json({ ok: true, service: 'set-bot-cursor-callback-legacy' });
   }
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  let body;
-  try {
-    body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-  } catch {
-    body = {};
-  }
-
-  const itemId = req.query.itemId;
-  const mode = (req.query.mode === 'implement') ? 'implement' : 'research';
+  const ticketId = req.query.itemId;
+  const mode = req.query.mode === 'implement' ? 'implement' : 'research';
   const userId = req.query.userId ?? null;
-  const agentId = body?.id ?? body?.agentId ?? body?.agent?.id;
-
-  console.log(`[cursor-webhook] item=${itemId} agent=${agentId} mode=${mode} userId=${userId} body=${JSON.stringify(body).slice(0, 500)}`);
-
-  if (!itemId || !agentId) {
-    return res.status(200).json({ ok: true, warning: 'missing itemId or agentId' });
+  if (!ticketId) {
+    return res.status(200).json({ ok: true, warning: 'missing itemId' });
   }
 
-  const status = String(body?.status ?? body?.agent?.status ?? '').toLowerCase();
-  const terminalOk = ['completed', 'finished', 'succeeded', 'success', 'done'].includes(status);
-  const terminalFail = ['failed', 'errored', 'error', 'cancelled', 'canceled', 'timeout', 'timed_out'].includes(status);
-  const isTerminal = terminalOk || terminalFail;
+  const agentProvider = getAgentProvider('cursor');
+  const ticketProvider = getTicketProvider('monday');
+  const parsed = agentProvider.parseCallback(req);
+  if (!parsed) {
+    return res.status(200).json({ ok: true, warning: 'missing agentId' });
+  }
 
   waitUntil(
     (async () => {
-      const notifyEmail = userId ? await getUserEmail(userId).catch(() => null) : null;
-      if (isTerminal) {
-        await postAgentResult({ itemId, agentId, mode, webhookBody: body, notifyEmail });
+      const notifyEmail = userId ? await ticketProvider.getRequesterEmail(userId).catch(() => null) : null;
+      if (parsed.terminal) {
+        await postAgentResult({
+          ticketProvider,
+          agentProvider,
+          ticketId,
+          agentId: parsed.agentId,
+          mode,
+          webhookBody: parsed.raw,
+          notifyEmail,
+        });
       } else {
-        await maybePostAgentUrl({ itemId, agentId, mode, webhookBody: body, notifyEmail });
+        const liveUrl = parsed.raw?.target?.url ?? parsed.raw?.url ?? `https://cursor.com/agents/${parsed.agentId}`;
+        const context = await ticketProvider.getTicketContext(ticketId);
+        const haystack = JSON.stringify(context?.history ?? '');
+        if (haystack.includes(parsed.agentId)) return;
+        const label = mode === 'implement' ? 'Implementation' : 'Research';
+        await notify(
+          { ticketProvider, ticketId, email: notifyEmail },
+          `🚀 ${label} agent is running.<br>Live progress: <a href="${escapeHtml(liveUrl)}">${escapeHtml(liveUrl)}</a><br><sub>agent:cursor:${parsed.agentId}</sub> 🐕 bark!`
+        );
       }
-    })().catch((err) => console.error('[cursor-webhook] processing failed:', err))
+    })().catch((err) => console.error('[cursor-webhook-legacy] processing failed:', err))
   );
 
   return res.status(200).json({ ok: true });
-}
-
-async function maybePostAgentUrl({ itemId, agentId, mode, webhookBody, notifyEmail }) {
-  const agentUrl =
-    webhookBody?.target?.url ??
-    webhookBody?.url ??
-    `https://cursor.com/agents/${agentId}`;
-
-  // Dedup: if we already posted this agent's URL on the ticket, skip.
-  const item = await getItemContext(itemId);
-  const haystack = JSON.stringify(item?.updates ?? '');
-  if (haystack.includes(agentId)) {
-    console.log(`[cursor-webhook] agent ${agentId} already announced on item ${itemId}`);
-    return;
-  }
-
-  const label = mode === 'implement' ? 'Implementation' : 'Research';
-  await notify(
-    itemId,
-    `🚀 ${label} agent is running.<br>Live progress: <a href="${escapeHtml(agentUrl)}">${escapeHtml(agentUrl)}</a> 🐕 bark!`,
-    notifyEmail
-  );
-  console.log(`[cursor-webhook] Announced agent ${agentId} on item ${itemId}`);
 }

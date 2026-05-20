@@ -1,10 +1,10 @@
 {
   "functions": {
-    "api/webhook.js": {
-      "maxDuration": 60
-    },
-    "api/cursor-webhook.js": {
-      "maxDuration": 60
-    }
+    "api/webhook.js": { "maxDuration": 60 },
+    "api/cursor-webhook.js": { "maxDuration": 60 },
+    "api/tickets/monday/webhook.js": { "maxDuration": 60 },
+    "api/tickets/jira/webhook.js": { "maxDuration": 60 },
+    "api/agents/cursor/callback.js": { "maxDuration": 60 },
+    "api/agents/anthropic/callback.js": { "maxDuration": 60 }
   }
 }

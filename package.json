@@ -1,7 +1,7 @@
 {
   "name": "set-bot",
   "version": "0.1.0",
-  "description": "Set — a monday.com bot that triages tickets and dispatches Cursor background agents",
+  "description": "Set — a pluggable ticket-bot that dispatches coding agents (Monday/Jira tickets × Cursor/Anthropic agents)",
   "type": "module",
   "engines": {
     "node": ">=20"

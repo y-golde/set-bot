@@ -4,37 +4,72 @@ Guidance for AI coding agents (Cursor, Claude Code, Codex, etc.) working in this
 
 ## What this is
 
-Set is a small monday.com webhook bot that dispatches Cursor background agents. The whole thing is ~600 lines of plain Node — no framework, no TypeScript, no bundler. Read all of `api/` and `lib/` before making non-trivial changes; it's faster than guessing.
+Set is a small webhook bot that dispatches coding agents against tickets. Tickets can come from any registered **TicketProvider** (Monday today, Jira today); work can run on any registered **AgentProvider** (Cursor today, Anthropic today). The whole thing is plain Node — no framework, no TypeScript, no bundler. Read all of `api/` and `lib/` before making non-trivial changes; it's faster than guessing.
 
 ## Layout
 
 ```
 api/
-  webhook.js          # POST handler for monday events (create_pulse, create_update, create_reply)
-  cursor-webhook.js   # POST handler for Cursor agent callbacks
+  tickets/
+    monday/webhook.js     # POST handler for Monday events
+    jira/webhook.js       # POST handler for Jira webhooks
+  agents/
+    cursor/callback.js    # POST handler for Cursor agent callbacks
+    anthropic/callback.js # POST handler for Anthropic (sync — no-op shim)
+  webhook.js              # back-compat: forwards to tickets/monday/webhook
+  cursor-webhook.js       # back-compat: forwards to agents/cursor/callback
 lib/
-  monday.js           # monday.com GraphQL client + helpers (postUpdate, getItemContext, extractRepoUrl, …)
-  cursor.js           # Cursor Background Agents API client (launchAgent, getAgent, getAgentConversation)
-  result.js           # Reads agent state, posts result + PR link back to monday
-  notify.js           # Posts a monday update AND DMs the triggering user on Slack
-  slack.js            # Minimal Slack Web API client (users.lookupByEmail, chat.postMessage)
+  dispatch.js             # !set parsing, MODES, command dispatch
+  route-helpers.js        # shared POST handlers used by the api/ routes
+  notify.js               # comment + Slack DM helper (provider-agnostic)
+  result.js               # reads agent state via AgentProvider, posts back
+  monday.js               # monday.com GraphQL client
+  jira.js                 # Jira REST client + HTML↔ADF helpers
+  cursor.js               # Cursor Background Agents API client
+  anthropic.js            # Anthropic Messages API client
+  slack.js                # Slack Web API client (users.lookupByEmail, chat.postMessage)
+  providers/
+    tickets/
+      index.js            # TicketProvider contract + registry
+      monday.js           # TicketProvider implementation
+      jira.js             # TicketProvider implementation
+    agents/
+      index.js            # AgentProvider contract + registry
+      cursor.js           # AgentProvider implementation (deferred)
+      anthropic.js        # AgentProvider implementation (sync)
 ```
+
+## Provider contracts
+
+The contracts live as JSDoc in `lib/providers/tickets/index.js` and `lib/providers/agents/index.js`. Adding a new tracker (e.g. Linear) or a new agent platform (e.g. GitHub Copilot Workspace) is "implement the interface, register it" — no changes to `dispatch.js` should be needed.
+
+Provider IDs are stable strings (`monday`, `jira`, `cursor`, `anthropic`) and appear in:
+- Route paths: `/api/tickets/<id>/webhook`, `/api/agents/<id>/callback`
+- Comment markers: `agent:<id>:<agentId>` (used by `!set status` to find prior agents)
+- Logs
+
+### Agent provider kinds
+
+- **deferred** (Cursor): `launchAgent` returns immediately; the agent runs out of band and POSTs back to `callbackUrl` when status changes.
+- **sync** (Anthropic): `launchAgent` runs inline and returns the finished result in `launch.sync`. No callback fires.
+
+`dispatch.js#handleSyncLaunch` posts the result right away for sync providers; `route-helpers.js#handleAgentCallback` handles deferred ones.
 
 ## Conventions
 
-- **ESM only** (`"type": "module"` in `package.json`). Use `import`, not `require`.
+- **ESM only** (`"type": "module"`). Use `import`, not `require`.
 - **No build step.** Code runs as-is on Vercel's Node 20 runtime.
-- **No deps unless necessary.** The only runtime dep is `@vercel/functions` for `waitUntil`. Don't add a framework or HTTP client — `fetch` is built in.
-- **Always return 200 from webhook handlers.** monday retries non-200 responses for 30 minutes. Real work goes in `waitUntil(...)` so the response can be sent immediately while processing happens in the background. Errors are logged, not surfaced as 5xx.
-- **HTML in monday comments, plain text everywhere else.** monday's `create_update` mutation accepts a small HTML subset (`<b>`, `<br>`, `<a>`, `<code>`). `lib/notify.js#htmlToSlack` mirrors that into Slack mrkdwn.
-- **Always escape user-controlled strings** with `escapeHtml` before splicing into update bodies. Item names, error messages, agent output — all of it.
-- **Log prefix is `[set-bot]`.** Match it for new log lines so existing log filters keep working.
-- **Persona stays light.** Set is a dog. Sign-offs use the `sign()` helper in `api/webhook.js`. Don't sprinkle emoji elsewhere.
+- **No deps unless necessary.** The only runtime dep is `@vercel/functions` for `waitUntil`.
+- **Always return 200 from webhook handlers.** Monday/Jira retry non-200 responses; real work goes in `waitUntil(...)`.
+- **HTML in ticket comments, plain text everywhere else.** Each ticket provider's `postComment` accepts the small Monday-style HTML subset (`<b>`, `<br>`, `<a>`, `<code>`). Providers translate at the boundary — Jira converts to ADF in `lib/jira.js#htmlToADF`.
+- **Always escape user-controlled strings** with `escapeHtml` before splicing into comments.
+- **Log prefix is `[set-bot]`** for dispatcher logs; per-provider routes use `[<provider>-callback]`.
+- **Persona stays light.** Set is a dog. Sign-offs use the `sign()` helper in `dispatch.js`.
 
 ## Commands
 
 ```bash
-npm install            # install @vercel/functions
+npm install
 npx vercel dev         # local dev server on :3000
 npx vercel             # deploy preview
 npx vercel --prod      # deploy to production
@@ -46,30 +81,34 @@ There are no tests yet. If you add a feature complex enough to want one, add tes
 
 | Task | File |
 |---|---|
-| Add a new `!set <command>` | `api/webhook.js` — extend the `MODES` table or the `command === 'foo'` branches in `handleReply` |
-| Change what context is sent to the agent | `lib/monday.js#getItemContext` / `formatItemContext`, then the `buildPrompt` functions in `api/webhook.js` |
+| Add a new `!set <command>` | `lib/dispatch.js` — extend the `MODES` table or the `command === 'foo'` branches in `handleReply` |
+| Add a new ticket provider | New file under `lib/providers/tickets/`, register in `lib/providers/tickets/index.js`, add route under `api/tickets/<id>/` |
+| Add a new agent provider | New file under `lib/providers/agents/`, register in `lib/providers/agents/index.js`, add route under `api/agents/<id>/` |
+| Change what context is sent to the agent | `lib/dispatch.js` `buildPrompt` + each ticket provider's `getTicketContext` |
 | Tweak result/PR formatting | `lib/result.js#postAgentResult` |
 | Change Slack DM behaviour | `lib/notify.js`, `lib/slack.js` |
-| Support a different repo column name | `lib/monday.js#extractRepoUrl` (defaults to `"Repositories"`) |
-| Support a non-GitHub repo host | `lib/monday.js#normalizeGithubUrl` — currently hard-codes `github.com` |
+| Support a non-GitHub repo host | `lib/monday.js#normalizeGithubUrl` (shared by both ticket providers) |
 
 ## Things to *not* do
 
-- **Don't add a database.** State lives on the monday ticket. The audit log is the comment history.
+- **Don't add a database.** State lives on the ticket. The audit log is the comment history.
 - **Don't loosen the 200-on-error contract** in webhook handlers — it's load-bearing for retry behaviour.
-- **Don't add Slack as a hard dependency.** Slack DMs are best-effort; absence of `SLACK_BOT_TOKEN` must not break the monday flow.
+- **Don't add Slack as a hard dependency.** Slack DMs are best-effort.
 - **Don't strip the dog persona.** It's the brand.
 - **Don't put secrets in code or commits.** Use Vercel env vars. `.env` is gitignored.
+- **Don't reach across provider boundaries.** Anything ticket-specific stays in `lib/providers/tickets/<id>.js` + `lib/<id>.js`. Anything agent-specific stays in `lib/providers/agents/<id>.js` + `lib/<id>.js`. `dispatch.js` and `result.js` only talk to providers through the interface.
 
 ## API drift
 
-Both upstream APIs are young and the response shapes shift:
+All four upstream APIs are young and the response shapes shift:
 
-- **monday.com GraphQL** — versioned via `API-Version: 2024-10` header in `lib/monday.js`. Bump the version intentionally, not casually; check the [changelog](https://developer.monday.com/api-reference/docs/changelog).
-- **Cursor Background Agents** — `lib/cursor.js` calls `https://api.cursor.com/v0`. Field names like `target.url`, `pullRequest.url`, `status` have moved before. `lib/result.js#findPrUrl` reads from several locations defensively — extend that pattern rather than assuming a single shape.
+- **monday.com GraphQL** — versioned via `API-Version: 2024-10` header in `lib/monday.js`.
+- **Jira REST** — `lib/jira.js` calls `/rest/api/3`. ADF schema is documented but evolving.
+- **Cursor Background Agents** — `lib/cursor.js` calls `https://api.cursor.com/v0`. Field names like `target.url`, `pullRequest.url`, `status` have moved before. `lib/providers/agents/cursor.js#findPrUrl` reads from several locations defensively.
+- **Anthropic Messages** — `lib/anthropic.js` calls `https://api.anthropic.com/v1/messages` with `anthropic-version: 2023-06-01`.
 
 ## Style
 
 - Two-space indent, single quotes, no semicolons on import statements (match existing files).
 - Prefer small top-level functions over classes.
-- Comments explain *why*, not *what*. The code already says what.
+- Comments explain *why*, not *what*.

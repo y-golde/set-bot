@@ -1,38 +1,54 @@
 # Set 🐕
 
-> A monday.com bot that triages tickets and dispatches [Cursor background agents](https://docs.cursor.com/background-agent) to investigate or implement them.
+> A pluggable ticket-bot that dispatches coding agents. Plug in any tracker (Monday, Jira) and any agent platform (Cursor, Anthropic) — they talk through a small provider interface.
 
-Set is named after [my dog](https://github.com/y-golde). When a new item is created on a monday board, Set drops in a triage comment. Reply with `!set research` or `!set implement` and Set spins up a Cursor agent against the repo named on the ticket, then posts the result (and a PR link, when relevant) back as a comment — and DMs the requester on Slack if their email matches a Slack user.
+Set is named after [my dog](https://github.com/y-golde). When a new ticket is created, Set drops in a triage comment. Reply with `!set research` or `!set implement` and Set spins up an agent against the repo named on the ticket, then posts the result (and a PR link, when relevant) back as a comment — and DMs the requester on Slack if their email matches a Slack user.
 
 ---
 
 ## What it does
 
 ```
-monday.com board
-  ├─ item created       ──► Set posts: "Hi! Reply !set research or !set implement"
-  └─ reply "!set …"     ──► Set launches a Cursor agent against the repo in the
-                              "Repositories" column, posts the agent URL, and
+ticket tracker (Monday / Jira)
+  ├─ ticket created     ──► Set posts: "Hi! Reply !set research or !set implement"
+  └─ reply "!set …"     ──► Set launches an agent (Cursor / Anthropic) against
+                              the repo on the ticket, posts the agent URL, and
                               (when the agent finishes) posts the result + PR link.
 ```
 
-Supported commands (anyone on the board can use them):
+Supported commands (anyone on the board / project can use them):
 
 | Command | What it does |
 |---|---|
-| `!set research` | Spins up a Cursor agent that investigates and posts a brief. No code changes. |
-| `!set implement` | Spins up a Cursor agent that writes code and opens a PR. |
+| `!set research` | Spins up an agent that investigates and posts a brief. No code changes. |
+| `!set implement` | Spins up an agent that writes code and opens a PR. |
 | `!set status` | Re-posts the latest agent's status / result on the ticket. |
 | `!set help` | Lists commands. |
+
+Add `--agent=<id>` to any command to override the default agent provider for that run, e.g. `!set research --agent=anthropic`.
 
 ## Architecture
 
 - **Runtime:** Node 20, ESM, one runtime dependency (`@vercel/functions`).
-- **Deploy:** two Vercel serverless functions in [`api/`](api/) — one webhook for monday events, one callback for Cursor.
-- **Storage:** none. State lives on the monday ticket itself (comment history is the audit log).
-- **Auth:** raw monday API token; optional `?secret=` query-param guard on the webhook.
+- **Deploy:** Vercel serverless functions, one route per provider.
+- **Storage:** none. State lives on the ticket itself (comment history is the audit log).
+- **Providers:** ticket trackers and agent platforms are pluggable behind small interfaces in [`lib/providers/`](lib/providers/). Today: Monday + Jira for tickets, Cursor + Anthropic for agents.
 
-See [AGENTS.md](AGENTS.md) for a tour of the code layout.
+See [AGENTS.md](AGENTS.md) for a tour of the code layout and the provider contracts.
+
+### Endpoints
+
+| Method | Path | Behaviour |
+|---|---|---|
+| `POST` | `/api/tickets/monday/webhook` | Monday events |
+| `POST` | `/api/tickets/jira/webhook` | Jira webhooks |
+| `POST` | `/api/agents/cursor/callback` | Cursor agent status callbacks |
+| `POST` | `/api/agents/anthropic/callback` | Symmetry only — Anthropic is synchronous |
+| `POST` | `/api/webhook` | Back-compat alias for the Monday route |
+| `POST` | `/api/cursor-webhook` | Back-compat alias for the Cursor callback |
+| `GET` | any of the above | Health check |
+
+The handler always returns 200 so the tracker doesn't retry-storm on transient failures — actual work happens in `waitUntil`.
 
 ---
 
@@ -44,88 +60,83 @@ See [AGENTS.md](AGENTS.md) for a tour of the code layout.
 git clone https://github.com/y-golde/set-bot.git
 cd set-bot
 cp .env.example .env
-# fill in MONDAY_API_TOKEN (and optionally the others)
+# fill in the env vars for the providers you want
 ```
 
 ### 2. Deploy to Vercel
 
 ```bash
-npm i -g vercel        # one-time
-vercel                 # follow prompts, link/create project
-vercel --prod          # promote to production
+npm i -g vercel
+vercel
+vercel --prod
 ```
 
 ### 3. Add env vars in Vercel
 
-```bash
-vercel env add MONDAY_API_TOKEN production
-vercel env add CURSOR_API_KEY production
-vercel env add WEBHOOK_SHARED_SECRET production   # optional but recommended
-vercel env add SLACK_BOT_TOKEN production         # optional, enables DMs
-vercel env add DEFAULT_REPO_OWNER production      # optional
-```
+At minimum:
+- `AGENT_PROVIDER` (`cursor` or `anthropic`)
+- The credentials for the chosen agent provider (`CURSOR_API_KEY` or `ANTHROPIC_API_KEY`)
+- The credentials for each ticket tracker you'll wire up (`MONDAY_API_TOKEN` and/or `JIRA_BASE_URL` + `JIRA_EMAIL` + `JIRA_API_TOKEN`)
 
-Or set them in the dashboard: **Project → Settings → Environment Variables**.
+See [`.env.example`](.env.example) for the full list with comments.
 
-### 4. Configure the webhook in monday.com
+### 4. Configure the webhook in your tracker
 
-On the board:
+**Monday.com.** Board → **Integrations** (puzzle icon) → **Webhooks** → **Add Webhook**, then add three subscriptions pointing at the same URL:
+- `When an item is created`
+- `When an update is created`
+- `When someone replies to an update`
 
-1. Go to **Integrations** (puzzle icon) → **Webhooks**
-2. **Add Webhook**, then add three subscriptions pointing at the same URL:
-   - `When an item is created`
-   - `When an update is created`
-   - `When someone replies to an update`
-3. URL:
-   - Without secret: `https://<your-vercel-domain>/api/webhook`
-   - With secret:    `https://<your-vercel-domain>/api/webhook?secret=<WEBHOOK_SHARED_SECRET>`
-
-monday sends a challenge GET/POST on subscribe; the handler echoes it back automatically.
+URL: `https://<your-vercel-domain>/api/tickets/monday/webhook` (or `?secret=<WEBHOOK_SHARED_SECRET>`).
 
 Add a **Repositories** column to the board (link, text, or formula — anything whose `text` resolves to a GitHub repo URL, `owner/repo` slug, or bare repo name when `DEFAULT_REPO_OWNER` is set).
+
+**Jira Cloud.** Project settings → **System WebHooks** (or use an Automation rule) and subscribe to:
+- `Issue created`
+- `Comment created`
+
+URL: `https://<your-vercel-domain>/api/tickets/jira/webhook`.
+
+To store the repo URL on each issue, either:
+- Add a custom field (e.g. "Repository") and set `JIRA_REPO_FIELD=customfield_XXXXX`, or
+- Mention the GitHub URL anywhere in the issue description — Set will pick it up.
 
 ### 5. Local development
 
 ```bash
-cp .env.example .env   # fill in your tokens
-npx vercel dev         # runs on http://localhost:3000
-# then expose /api/webhook publicly (e.g. via ngrok) so monday can reach it
+cp .env.example .env
+npx vercel dev         # http://localhost:3000
+# then expose /api publicly (e.g. via ngrok) so the tracker can reach it
 ```
 
 ---
 
 ## Environment variables
 
-| Variable | Required | Description |
-|---|:---:|---|
-| `MONDAY_API_TOKEN` | ✅ | Personal API token from monday.com developer settings. |
-| `CURSOR_API_KEY` | ✅ | Cursor Background Agents API key ([cursor.com/settings → API Keys](https://cursor.com/settings)). |
-| `WEBHOOK_SHARED_SECRET` |  | If set, requests must include `?secret=<value>`. |
-| `CURSOR_MODEL` |  | Cursor agent model. Defaults to `composer-2.5-fast`. |
-| `DEFAULT_REPO_OWNER` |  | GitHub org/user prefix used when the Repositories column contains a bare repo name. |
-| `SLACK_BOT_TOKEN` |  | Slack bot token (`xoxb-…`). Enables DMs to the user who triggered the command. Needs `users:read.email` and `chat:write` scopes. |
-| `AUTHORIZED_USER_IDS` |  | Comma-separated monday user IDs allowed to issue `!set` commands. Currently unused — commands are open to everyone on the board. Kept for future tightening. |
-
----
-
-## Endpoints
-
-| Method | Path | Behaviour |
+| Variable | Required for | Description |
 |---|---|---|
-| `GET` | `/api/webhook` | Health check — returns `{"ok":true,"service":"set-bot"}`. |
-| `POST` | `/api/webhook` | Handles monday events (challenge handshake, `create_pulse`, `create_update`, `create_reply`). |
-| `GET` | `/api/cursor-webhook` | Health check. |
-| `POST` | `/api/cursor-webhook` | Cursor calls this when an agent makes progress or finishes; Set posts the result on the originating monday ticket. |
-
-The handler always returns 200 so monday doesn't retry-storm on transient failures — actual work happens in `waitUntil`.
+| `AGENT_PROVIDER` | all | Default agent provider — `cursor` or `anthropic`. |
+| `WEBHOOK_SHARED_SECRET` |  | If set, ticket webhook requests must include `?secret=<value>`. |
+| `MONDAY_API_TOKEN` | Monday | Personal API token from monday.com developer settings. |
+| `JIRA_BASE_URL` | Jira | `https://<your-org>.atlassian.net` |
+| `JIRA_EMAIL` | Jira | Email used for Basic auth. |
+| `JIRA_API_TOKEN` | Jira | Token from id.atlassian.com → API tokens. |
+| `JIRA_REPO_FIELD` |  | Custom-field id holding the repo URL (e.g. `customfield_10042`). Optional. |
+| `CURSOR_API_KEY` | Cursor | Cursor Background Agents API key. |
+| `CURSOR_MODEL` |  | Cursor agent model. Defaults to `composer-2.5-fast`. |
+| `ANTHROPIC_API_KEY` | Anthropic | Anthropic API key. |
+| `ANTHROPIC_MODEL` |  | Anthropic model. Defaults to `claude-opus-4-7`. |
+| `DEFAULT_REPO_OWNER` |  | GitHub org/user prefix used when the repo field contains a bare repo name. |
+| `SLACK_BOT_TOKEN` |  | Slack bot token (`xoxb-…`). Enables DMs. Needs `users:read.email` and `chat:write` scopes. |
+| `AUTHORIZED_USER_IDS` |  | Comma-separated user IDs allowed to issue `!set` commands. Currently unused. |
 
 ---
 
 ## Contributing
 
-PRs and issues welcome. The project is small enough to read top to bottom in one sitting — [`AGENTS.md`](AGENTS.md) has a quick tour.
+PRs and issues welcome. The project is small enough to read top to bottom in one sitting — [`AGENTS.md`](AGENTS.md) has a quick tour, and the provider interfaces are documented inline in [`lib/providers/tickets/index.js`](lib/providers/tickets/index.js) and [`lib/providers/agents/index.js`](lib/providers/agents/index.js).
 
-If you're using Set internally and adapting it (different ticket tracker, different agent platform, extra commands), feel free to fork — there's no clever framework here, just a webhook handler and two API clients.
+Adding a new tracker (Linear, GitHub Issues, …) or a new agent platform (GitHub Copilot Workspace, Replit Ghostwriter, …) is "implement the interface, register it" — no changes to the dispatcher needed.
 
 ## License
 
