@@ -8,7 +8,7 @@ import { notify } from '../lib/notify.js';
 //   ?itemId=<monday item id>&mode=<research|implement>&userId=<monday user id>
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ ok: true, service: 'monday-bot-cursor-callback' });
+    return res.status(200).json({ ok: true, service: 'set-bot-cursor-callback' });
   }
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });

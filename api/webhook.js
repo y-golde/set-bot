@@ -66,14 +66,15 @@ a brief that directly answers it. Cover:
 2. Where in the codebase the answer lives (paths + line numbers if helpful).
 3. Any caveats, gotchas, or relevant nearby context.
 
-You have access to a Coralogix MCP server. Use it whenever the question
-involves production logs, errors, runtime behavior, or service metrics —
-query Coralogix directly instead of guessing from the code.
-
 Note: comments starting with "!set" are bot triggers (e.g. "!set
 research", "!set implement"), not part of the question. Bot status
 comments (🔬, 🚀, ✅, ❌, ⚠️, 🔧, 👋, 🐕) and any "woof"/"bark"
 sign-offs can also be ignored — that's just the bot's persona.
+
+Use whatever MCP servers / tools you have available (logging backends,
+observability platforms, search, etc.) when the question involves
+production behavior or runtime data — query them directly instead of
+guessing from the code.
 
 Do not modify code. Keep the brief tight (under ~400 words).`,
   },
@@ -102,15 +103,15 @@ The PR description should restate the request, summarize what changed
 and why, and list any follow-ups or caveats. Link back to the monday
 ticket title at the top of the PR description.
 
-You have access to a Coralogix MCP server. Use it whenever the task
-requires understanding production logs, errors, runtime behavior, or
-service metrics before changing code — query Coralogix directly
-instead of guessing.
-
 Note: comments starting with "!set" are bot triggers (e.g. "!set
 research", "!set implement"), not part of the question. Bot status
 comments (🔬, 🚀, ✅, ❌, ⚠️, 🔧, 👋, 🐕) and any "woof"/"bark"
 sign-offs can also be ignored — that's just the bot's persona.
+
+Use whatever MCP servers / tools you have available (logging backends,
+observability platforms, search, etc.) when the task requires
+understanding production behavior or runtime data before changing code
+— query them directly instead of guessing.
 
 If the request is ambiguous or you cannot proceed safely, stop and
 explain what you need rather than guessing.`,
@@ -119,7 +120,7 @@ explain what you need rather than guessing.`,
 
 export default async function handler(req, res) {
   if (req.method === 'GET') {
-    return res.status(200).json({ ok: true, service: 'monday-bot' });
+    return res.status(200).json({ ok: true, service: 'set-bot' });
   }
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -134,7 +135,7 @@ export default async function handler(req, res) {
   try {
     body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
   } catch (err) {
-    console.error('[monday-bot] Bad JSON body:', err);
+    console.error('[set-bot] Bad JSON body:', err);
     return res.status(200).json({ ok: true });
   }
 
@@ -148,7 +149,7 @@ export default async function handler(req, res) {
 
   waitUntil(
     processEvent(type, event, host).catch((err) => {
-      console.error('[monday-bot] Background processing error:', err);
+      console.error('[set-bot] Background processing error:', err);
     })
   );
 
@@ -158,14 +159,14 @@ export default async function handler(req, res) {
 async function processEvent(type, event, host) {
   if (type === 'create_pulse') {
     await postUpdate(event.pulseId, INITIAL_COMMENT(event.pulseName ?? 'this item'));
-    console.log(`[monday-bot] Triage prompt posted on item ${event.pulseId}`);
+    console.log(`[set-bot] Triage prompt posted on item ${event.pulseId}`);
     return;
   }
   if (type === 'create_update' || type === 'create_reply') {
     await handleReply(event, host);
     return;
   }
-  console.log(`[monday-bot] Ignoring event type: ${type ?? 'unknown'}`);
+  console.log(`[set-bot] Ignoring event type: ${type ?? 'unknown'}`);
 }
 
 async function handleReply(event, host) {
@@ -255,9 +256,9 @@ async function handleReply(event, host) {
       `🚀 ${mode.label[0].toUpperCase() + mode.label.slice(1)} agent is running.<br>Live progress: <a href="${escapeHtml(agentUrl)}">${escapeHtml(agentUrl)}</a>${sign('happy')}`,
       triggerEmail
     );
-    console.log(`[monday-bot] Launched Cursor ${mode.label} agent ${agent?.id} for item ${itemId}`);
+    console.log(`[set-bot] Launched Cursor ${mode.label} agent ${agent?.id} for item ${itemId}`);
   } catch (err) {
-    console.error(`[monday-bot] Cursor ${mode.label} launch failed:`, err);
+    console.error(`[set-bot] Cursor ${mode.label} launch failed:`, err);
     const isTimeout = err?.name === 'AbortError' || /aborted|timeout/i.test(err?.message ?? '');
     if (isTimeout) {
       await notify(

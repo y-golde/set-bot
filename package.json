@@ -1,7 +1,7 @@
 {
-  "name": "monday-bot-vercel",
+  "name": "set-bot",
   "version": "0.1.0",
-  "description": "monday.com webhook bot — posts triage comments, triggers Cursor agents",
+  "description": "Set — a monday.com bot that triages tickets and dispatches Cursor background agents",
   "type": "module",
   "engines": {
     "node": ">=20"
