@@ -4,7 +4,7 @@ Guidance for AI coding agents (Cursor, Claude Code, Codex, etc.) working in this
 
 ## What this is
 
-Set is a small webhook bot that dispatches coding agents against tickets. Tickets can come from any registered **TicketProvider** (Monday today, Jira today); work can run on any registered **AgentProvider** (Cursor today, Anthropic today). The whole thing is plain Node — no framework, no TypeScript, no bundler. Read all of `api/` and `lib/` before making non-trivial changes; it's faster than guessing.
+Set is a small webhook bot that dispatches coding agents against tickets. Tickets can come from any registered **TicketProvider** (Monday today, Jira today); work can run on any registered **AgentProvider** (Cursor today, Anthropic today). On ticket creation it can also call a **RepoSuggester** (Unblocked today, no-op default) to guess the right repository and offer it back to the user. The whole thing is plain Node — no framework, no TypeScript, no bundler. Read all of `api/` and `lib/` before making non-trivial changes; it's faster than guessing.
 
 ## Layout
 
@@ -35,11 +35,15 @@ lib/
       index.js            # AgentProvider contract + registry
       cursor.js           # AgentProvider implementation (deferred)
       anthropic.js        # AgentProvider implementation (sync)
+    repo-suggesters/
+      index.js            # RepoSuggester contract + registry
+      noop.js             # default — feature off
+      unblocked.js        # Anthropic + Unblocked MCP
 ```
 
 ## Provider contracts
 
-The contracts live as JSDoc in `lib/providers/tickets/index.js` and `lib/providers/agents/index.js`. Adding a new tracker (e.g. Linear) or a new agent platform (e.g. GitHub Copilot Workspace) is "implement the interface, register it" — no changes to `dispatch.js` should be needed.
+The contracts live as JSDoc in `lib/providers/tickets/index.js`, `lib/providers/agents/index.js`, and `lib/providers/repo-suggesters/index.js`. Adding a new tracker (e.g. Linear), a new agent platform (e.g. GitHub Copilot Workspace), or a new repo-knowledge tool (e.g. Glean) is "implement the interface, register it" — no changes to `dispatch.js` should be needed.
 
 Provider IDs are stable strings (`monday`, `jira`, `cursor`, `anthropic`) and appear in:
 - Route paths: `/api/tickets/<id>/webhook`, `/api/agents/<id>/callback`
@@ -82,6 +86,8 @@ There are no tests yet. If you add a feature complex enough to want one, add tes
 | Add a new `!set <command>` | `lib/dispatch.js` — extend the `MODES` table or the `command === 'foo'` branches in `handleReply` |
 | Add a new ticket provider | New file under `lib/providers/tickets/`, register in `lib/providers/tickets/index.js`, add route under `api/tickets/<id>/` |
 | Add a new agent provider | New file under `lib/providers/agents/`, register in `lib/providers/agents/index.js`, add route under `api/agents/<id>/` |
+| Add a new repo suggester | New file under `lib/providers/repo-suggesters/`, register in `lib/providers/repo-suggesters/index.js`, point `REPO_SUGGESTER` at its id |
+| Tweak how the suggester comment looks / what triggers auto-accept | `lib/dispatch.js` `suggestRepo` + `tryAutoAcceptSuggestion` |
 | Change what context is sent to the agent | `lib/dispatch.js` `buildPrompt` + each ticket provider's `getTicketContext` |
 | Tweak result/PR formatting | `lib/result.js#postAgentResult` |
 | Change Slack DM behaviour | `lib/notify.js`, `lib/slack.js` |

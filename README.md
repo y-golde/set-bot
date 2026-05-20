@@ -2,7 +2,7 @@
 
 > A pluggable ticket-bot that dispatches coding agents. Plug in any tracker (Monday, Jira) and any agent platform (Cursor, Anthropic) — they talk through a small provider interface.
 
-Set is named after [my dog](https://github.com/y-golde). When a new ticket is created, Set drops in a triage comment. Reply with `!set research` or `!set implement` and Set spins up an agent against the repo named on the ticket, then posts the result (and a PR link, when relevant) back as a comment — and DMs the requester on Slack if their email matches a Slack user.
+Set is named after [my dog](https://github.com/y-golde). When a new ticket is created, Set drops in a triage comment — and, if a **repo suggester** is configured, follows up with a guess at which repository the ticket belongs to. Reply with `!set research` or `!set implement` and Set spins up an agent against the repo on the ticket (or the accepted suggestion), then posts the result (and a PR link, when relevant) back as a comment — and DMs the requester on Slack if their email matches a Slack user.
 
 ---
 
@@ -11,8 +11,11 @@ Set is named after [my dog](https://github.com/y-golde). When a new ticket is cr
 ```
 ticket tracker (Monday / Jira)
   ├─ ticket created     ──► Set posts: "Hi! Reply !set research or !set implement"
+  │                     ──► (optional) repo suggester posts: "🔎 my guess: <repo>"
+  ├─ reply "!set use"   ──► Set saves the suggested repo onto the ticket field.
   └─ reply "!set …"     ──► Set launches an agent (Cursor / Anthropic) against
-                              the repo on the ticket, posts the agent URL, and
+                              the repo on the ticket (auto-accepts the suggestion
+                              if the field is empty), posts the agent URL, and
                               (when the agent finishes) posts the result + PR link.
 ```
 
@@ -22,17 +25,32 @@ Supported commands (anyone on the board / project can use them):
 |---|---|
 | `!set research` | Spins up an agent that investigates and posts a brief. No code changes. |
 | `!set implement` | Spins up an agent that writes code and opens a PR. |
+| `!set use [repo-url]` | Accepts the suggested repo (or override with a URL) and writes it to the ticket. |
 | `!set status` | Re-posts the latest agent's status / result on the ticket. |
 | `!set help` | Lists commands. |
 
 Add `--agent=<id>` to any command to override the default agent provider for that run, e.g. `!set research --agent=anthropic`.
+
+## Auto-triage (optional)
+
+If you have a tool that knows your org's repos (today: Unblocked via its remote MCP server), Set can guess which repo a new ticket belongs to and offer it back. The user accepts with `!set use`, or just runs `!set research` / `!set implement` and Set auto-accepts the most recent suggestion.
+
+Enable it by setting:
+
+```
+REPO_SUGGESTER=unblocked
+UNBLOCKED_MCP_URL=https://…       # Unblocked remote MCP endpoint
+UNBLOCKED_MCP_TOKEN=…             # bearer token
+```
+
+The suggester is pluggable: add a new file under `lib/providers/repo-suggesters/` for any other MCP-capable tool (Glean, Sourcegraph, etc.) and point `REPO_SUGGESTER` at its id. Default is `noop` (feature off).
 
 ## Architecture
 
 - **Runtime:** Node 20, ESM, one runtime dependency (`@vercel/functions`).
 - **Deploy:** Vercel serverless functions, one route per provider.
 - **Storage:** none. State lives on the ticket itself (comment history is the audit log).
-- **Providers:** ticket trackers and agent platforms are pluggable behind small interfaces in [`lib/providers/`](lib/providers/). Today: Monday + Jira for tickets, Cursor + Anthropic for agents.
+- **Providers:** ticket trackers, agent platforms, and repo suggesters are pluggable behind small interfaces in [`lib/providers/`](lib/providers/). Today: Monday + Jira for tickets, Cursor + Anthropic for agents, Unblocked (and a no-op default) for repo suggesters.
 
 See [AGENTS.md](AGENTS.md) for a tour of the code layout and the provider contracts.
 
